@@ -7,6 +7,7 @@
 #include <OgreApplicationContext.h>
 #include <OgreCameraMan.h>
 #include <OgreRectangle2D.h>
+#include <OgreCompositorManager.h>
 
 #include <opencv2/calib3d.hpp>
 
@@ -97,11 +98,11 @@ static void _setCameraIntrinsics(Camera* cam, InputArray _K, const Size& imsize)
 
     Matx33f K = _K.getMat();
 
-    float near = cam->getNearClipDistance();
-    float top = near * K(1, 2) / K(1, 1);
-    float left = -near * K(0, 2) / K(0, 0);
-    float right = near * (imsize.width - K(0, 2)) / K(0, 0);
-    float bottom = -near * (imsize.height - K(1, 2)) / K(1, 1);
+    float zNear = cam->getNearClipDistance();
+    float top = zNear * K(1, 2) / K(1, 1);
+    float left = -zNear * K(0, 2) / K(0, 0);
+    float right = zNear * (imsize.width - K(0, 2)) / K(0, 0);
+    float bottom = -zNear * (imsize.height - K(1, 2)) / K(1, 1);
 
     // use frustum extents instead of setFrustumOffset as the latter
     // assumes centered FOV, which is not the case
@@ -339,6 +340,23 @@ public:
         bgplane->setVisible(true);
     }
 
+    void setCompositors(const std::vector<String>& names)
+    {
+        Viewport* vp = frameSrc->getViewport(0);
+        CompositorManager& cm = CompositorManager::getSingleton();
+
+        cm.removeCompositorChain(vp); // remove previous configuration
+
+        for(size_t i = 0; i < names.size(); i++)
+        {
+            if (!cm.addCompositor(vp, names[i])) {
+                LogManager::getSingleton().logError("Failed to add compositor: " + names[i]);
+                continue;
+            }
+            cm.setCompositorEnabled(vp, names[i], true);
+        }
+    }
+
     void setBackground(const Scalar& color)
     {
         // hide background plane
@@ -365,7 +383,12 @@ public:
     void removeEntity(const String& name) {
         SceneNode& node = _getSceneNode(sceneMgr, name);
         node.getAttachedObject(name)->detachFromParent();
+
+        // only one of the following will do something
+        sceneMgr->destroyLight(name);
         sceneMgr->destroyEntity(name);
+        sceneMgr->destroyCamera(name);
+
         sceneMgr->destroySceneNode(&node);
     }
 
