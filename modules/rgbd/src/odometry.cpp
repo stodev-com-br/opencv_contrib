@@ -10,10 +10,19 @@
 #include "fast_icp.hpp"
 
 #if defined(HAVE_EIGEN) && EIGEN_WORLD_VERSION == 3
-#define HAVE_EIGEN3_HERE
-#include <Eigen/Core>
-#include <unsupported/Eigen/MatrixFunctions>
-#include <Eigen/Dense>
+#  define HAVE_EIGEN3_HERE
+#  if defined(_MSC_VER)
+#    pragma warning(push)
+#    pragma warning(disable:4701)  // potentially uninitialized local variable
+#    pragma warning(disable:4702)  // unreachable code
+#    pragma warning(disable:4714)  // const marked as __forceinline not inlined
+#  endif
+#  include <Eigen/Core>
+#  include <unsupported/Eigen/MatrixFunctions>
+#  include <Eigen/Dense>
+#  if defined(_MSC_VER)
+#    pragma warning(pop)
+#  endif
 #endif
 
 namespace cv
@@ -1055,8 +1064,8 @@ bool Odometry::compute(Ptr<OdometryFrame>& srcFrame, Ptr<OdometryFrame>& dstFram
 
 Size Odometry::prepareFrameCache(Ptr<OdometryFrame> &frame, int /*cacheType*/) const
 {
-    if(frame == 0)
-        CV_Error(Error::StsBadArg, "Null frame pointer.\n");
+    if (!frame)
+        CV_Error(Error::StsBadArg, "Null frame pointer.");
 
     return Size();
 }

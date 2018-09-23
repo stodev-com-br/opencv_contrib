@@ -359,18 +359,26 @@ public:
 
     void setCompositors(const std::vector<String>& names)
     {
-        Viewport* vp = frameSrc->getViewport(0);
         CompositorManager& cm = CompositorManager::getSingleton();
+        // this should be applied to all owned render targets
+        Ogre::RenderTarget* targets[] = {frameSrc, rWin, depthRTT};
 
-        cm.removeCompositorChain(vp); // remove previous configuration
-
-        for(size_t i = 0; i < names.size(); i++)
+        for(int j = 0; j < 3; j++)
         {
-            if (!cm.addCompositor(vp, names[i])) {
-                LogManager::getSingleton().logError("Failed to add compositor: " + names[i]);
-                continue;
+            Ogre::RenderTarget* tgt = targets[j];
+            if(!tgt || (frameSrc == rWin && tgt == rWin)) continue;
+
+            Viewport* vp = tgt->getViewport(0);
+            cm.removeCompositorChain(vp); // remove previous configuration
+
+            for(size_t i = 0; i < names.size(); i++)
+            {
+                if (!cm.addCompositor(vp, names[i])) {
+                    LogManager::getSingleton().logError("Failed to add compositor: " + names[i]);
+                    continue;
+                }
+                cm.setCompositorEnabled(vp, names[i], true);
             }
-            cm.setCompositorEnabled(vp, names[i], true);
         }
     }
 
@@ -633,10 +641,13 @@ public:
         }
     }
 
-    void setCameraIntrinsics(InputArray K, const Size& imsize)
+    void setCameraIntrinsics(InputArray K, const Size& imsize, float zNear, float zFar)
     {
         Camera* cam = sceneMgr->getCamera(title);
-        _setCameraIntrinsics(cam, K, imsize);
+
+        if(zNear >= 0) cam->setNearClipDistance(zNear);
+        if(zFar >= 0) cam->setFarClipDistance(zFar);
+        if(!K.empty()) _setCameraIntrinsics(cam, K, imsize);
     }
 
     void setCameraLookAt(const String& target, InputArray offset)
