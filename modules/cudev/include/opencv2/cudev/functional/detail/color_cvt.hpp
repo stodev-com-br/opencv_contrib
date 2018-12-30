@@ -93,11 +93,15 @@ namespace color_cvt_detail
 
     enum
     {
+        rgb_shift  = 15,
         yuv_shift  = 14,
         xyz_shift  = 12,
         R2Y        = 4899,
         G2Y        = 9617,
         B2Y        = 1868,
+        RY15       = 9798,
+        GY15       = 19235,
+        BY15       = 3735,
         BLOCK_SIZE = 256
     };
 
@@ -311,6 +315,18 @@ namespace color_cvt_detail
             const int g = src.y;
             const int r = bidx == 0 ? src.z : src.x;
             return (T) CV_CUDEV_DESCALE(b * B2Y + g * G2Y + r * R2Y, yuv_shift);
+        }
+    };
+
+    template <int scn, int bidx> struct RGB2Gray<uchar, scn, bidx>
+        : unary_function<typename MakeVec<uchar, scn>::type, uchar>
+    {
+        __device__ uchar operator ()(const typename MakeVec<uchar, scn>::type& src) const
+        {
+            const int b = bidx == 0 ? src.x : src.z;
+            const int g = src.y;
+            const int r = bidx == 0 ? src.z : src.x;
+            return (uchar)CV_CUDEV_DESCALE(b * BY15 + g * GY15 + r * RY15, rgb_shift);
         }
     };
 
@@ -1207,27 +1223,29 @@ namespace color_cvt_detail
         __device__ typename MakeVec<float, dcn>::type operator ()(const typename MakeVec<float, scn>::type& src) const
         {
             const float _d = 1.f / (0.950456f + 15 + 1.088754f * 3);
-            const float _un = 4 * 0.950456f * _d;
-            const float _vn = 9 * _d;
+            const float _un = 13 * 4 * 0.950456f * _d;
+            const float _vn = 13 * 9 * _d;
 
             float L = src.x;
             float u = src.y;
             float v = src.z;
 
-            float Y = (L + 16.f) * (1.f / 116.f);
-            Y = Y * Y * Y;
+            float Y1 = (L + 16.f) * (1.f / 116.f);
+            Y1 = Y1 * Y1 * Y1;
+            float Y0 = L * (1.f / 903.3f);
+            float Y = L <= 8.f ? Y0 : Y1;
 
-            float d = (1.f / 13.f) / L;
-            u = u * d + _un;
-            v = v * d + _vn;
+            u = (u + _un * L) * 3.f;
+            v = (v + _vn * L) * 4.f;
 
             float iv = 1.f / v;
-            float X = 2.25f * u * Y * iv;
-            float Z = (12 - 3 * u - 20 * v) * Y * 0.25f * iv;
+            iv = ::fmaxf(-0.25f, ::fminf(0.25f, iv));
+            float X = 3.f * u * iv;
+            float Z = (12.f * 13.f * L - u) * iv - 5.f;
 
-            float B = 0.055648f * X - 0.204043f * Y + 1.057311f * Z;
-            float G = -0.969256f * X + 1.875991f * Y + 0.041556f * Z;
-            float R = 3.240479f * X - 1.537150f * Y - 0.498535f * Z;
+            float B = (0.055648f * X - 0.204043f + 1.057311f * Z) * Y;
+            float G = (-0.969256f * X + 1.875991f + 0.041556f * Z) * Y;
+            float R = (3.240479f * X - 1.537150f - 0.498535f * Z) * Y;
 
             R = ::fminf(::fmaxf(R, 0.f), 1.f);
             G = ::fminf(::fmaxf(G, 0.f), 1.f);

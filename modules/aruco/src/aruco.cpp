@@ -103,13 +103,12 @@ Ptr<DetectorParameters> DetectorParameters::create() {
   */
 static void _convertToGrey(InputArray _in, OutputArray _out) {
 
-    CV_Assert(_in.getMat().channels() == 1 || _in.getMat().channels() == 3);
+    CV_Assert(_in.type() == CV_8UC1 || _in.type() == CV_8UC3);
 
-    _out.create(_in.getMat().size(), CV_8UC1);
-    if(_in.getMat().type() == CV_8UC3)
-        cvtColor(_in.getMat(), _out.getMat(), COLOR_BGR2GRAY);
+    if(_in.type() == CV_8UC3)
+        cvtColor(_in, _out, COLOR_BGR2GRAY);
     else
-        _in.getMat().copyTo(_out);
+        _in.copyTo(_out);
 }
 
 
@@ -1767,7 +1766,7 @@ void drawMarker(const Ptr<Dictionary> &dictionary, int id, int sidePixels, Outpu
 void _drawPlanarBoardImpl(Board *_board, Size outSize, OutputArray _img, int marginSize,
                      int borderBits) {
 
-    CV_Assert(outSize.area() > 0);
+    CV_Assert(!outSize.empty());
     CV_Assert(marginSize >= 0);
 
     _img.create(outSize, CV_8UC1);
