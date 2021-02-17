@@ -187,6 +187,7 @@ struct Application : public OgreBites::ApplicationContext, public OgreBites::Inp
     uint32_t h;
     int key_pressed;
     int flags;
+    Ogre::MaterialPtr casterMat;
 
     Application(const Ogre::String& _title, const Size& sz, int _flags)
         : OgreBites::ApplicationContext("ovis"), mainWin(NULL), title(_title), w(sz.width),
@@ -287,6 +288,9 @@ struct Application : public OgreBites::ApplicationContext, public OgreBites::Inp
         MaterialManager& matMgr = MaterialManager::getSingleton();
         matMgr.setDefaultTextureFiltering(TFO_ANISOTROPIC);
         matMgr.setDefaultAnisotropy(16);
+        casterMat = matMgr.create("DepthCaster", Ogre::RGN_INTERNAL);
+        casterMat->setLightingEnabled(false);
+        casterMat->setDepthBias(-1, -1);
     }
 };
 
@@ -317,6 +321,21 @@ public:
             sceneMgr = root->createSceneManager("DefaultSceneManager", title);
             RTShader::ShaderGenerator& shadergen = RTShader::ShaderGenerator::getSingleton();
             shadergen.addSceneManager(sceneMgr); // must be done before we do anything with the scene
+
+            if (flags & SCENE_SHADOWS)
+            {
+                sceneMgr->setShadowTechnique(SHADOWTYPE_TEXTURE_MODULATIVE_INTEGRATED);
+                sceneMgr->setShadowTexturePixelFormat(PF_DEPTH32);
+                // arbitrary heuristic for shadowmap size
+                sceneMgr->setShadowTextureSize(std::max(sz.width, sz.height) * 2);
+                sceneMgr->setShadowCameraSetup(FocusedShadowCameraSetup::create());
+                sceneMgr->setShadowTextureCasterMaterial(app->casterMat);
+
+                // inject shadowmap into materials
+                const auto& schemeName = RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME;
+                auto rs = shadergen.getRenderState(schemeName);
+                rs->addTemplateSubRenderState(shadergen.createSubRenderState("SGX_IntegratedPSSM3"));
+            }
 
             sceneMgr->setAmbientLight(ColourValue(.1, .1, .1));
             _createBackground();
@@ -391,6 +410,14 @@ public:
             {
                 texMgr.remove(texName, RESOURCEGROUP_NAME);
             }
+
+            RTShader::ShaderGenerator::getSingleton().removeSceneManager(sceneMgr);
+            root->destroySceneManager(sceneMgr);
+        }
+        else
+        {
+            // we share everything, but the camera
+            sceneMgr->destroyCamera(title);
         }
 
         if(_app->mainWin == this && (flags & SCENE_SEPARATE))
@@ -547,14 +574,9 @@ public:
     }
 
     Rect2d createCameraEntity(const String& name, InputArray K, const Size& imsize, float zFar,
-                              InputArray tvec, InputArray rot) CV_OVERRIDE
+                              InputArray tvec, InputArray rot, const Scalar& color) CV_OVERRIDE
     {
-        MaterialPtr mat = MaterialManager::getSingleton().create(name, RESOURCEGROUP_NAME);
-        Pass* rpass = mat->getTechniques()[0]->getPasses()[0];
-        rpass->setEmissive(ColourValue::White);
-
         Camera* cam = sceneMgr->createCamera(name);
-        cam->setMaterial(mat);
 
         cam->setVisible(true);
         cam->setDebugDisplayEnabled(true);
@@ -562,6 +584,15 @@ public:
         cam->setFarClipDistance(zFar);
 
         _setCameraIntrinsics(cam, K, imsize);
+
+#if OGRE_VERSION < ((1 << 16) | (12 << 8) | 9)
+        MaterialPtr mat = MaterialManager::getSingleton().create(name, RESOURCEGROUP_NAME);
+        Pass* rpass = mat->getTechniques()[0]->getPasses()[0];
+        rpass->setEmissive(convertColor(color));
+        cam->setMaterial(mat);
+#else
+        cam->setDebugColour(convertColor(color));
+#endif
 
         Quaternion q;
         Vector3 t;
@@ -698,14 +729,6 @@ public:
         MaterialPtr mat = MaterialManager::getSingleton().getByName(value, RESOURCEGROUP_NAME);
         CV_Assert(mat && "material not found");
 
-        Camera* cam = dynamic_cast<Camera*>(node.getAttachedObject(name));
-        if(cam)
-        {
-            CV_Assert(subEntityIdx == -1 && "Camera Entities do not have SubEntities");
-            cam->setMaterial(mat);
-            return;
-        }
-
         Entity* ent = dynamic_cast<Entity*>(node.getAttachedObject(name));
         CV_Assert(ent && "invalid entity");
 
@@ -720,6 +743,13 @@ public:
         SceneNode& node = _getSceneNode(sceneMgr, name);
         switch(prop)
         {
+        case ENTITY_CAST_SHADOWS:
+        {
+            Entity* ent = dynamic_cast<Entity*>(node.getAttachedObject(name));
+            CV_Assert(ent && "invalid entity");
+            ent->setCastShadows(bool(value[0]));
+            break;
+        }
         case ENTITY_SCALE:
         {
             node.setScale(value[0], value[1], value[2]);
@@ -1012,13 +1042,16 @@ void setMaterialProperty(const String& name, int prop, const Scalar& val)
         CV_Error(Error::StsBadArg, "invalid or non Scalar property");
         break;
     }
+    RTShader::ShaderGenerator::getSingleton().invalidateMaterial(
+        RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME, name, RESOURCEGROUP_NAME);
 }
 
-void setMaterialProperty(const String& name, int prop, const String& value)
+static TextureUnitState* _getTextureUnitForUpdate(const String& material, int prop)
 {
     CV_Assert_N(prop >= MATERIAL_TEXTURE0, prop <= MATERIAL_TEXTURE3, _app);
 
-    MaterialPtr mat = MaterialManager::getSingleton().getByName(name, RESOURCEGROUP_NAME);
+    CV_Assert(_app);
+    auto mat = MaterialManager::getSingleton().getByName(material, RESOURCEGROUP_NAME);
     CV_Assert(mat);
 
     Pass* rpass = mat->getTechniques()[0]->getPasses()[0];
@@ -1026,13 +1059,32 @@ void setMaterialProperty(const String& name, int prop, const String& value)
     size_t texUnit = prop - MATERIAL_TEXTURE0;
     CV_Assert(texUnit <= rpass->getTextureUnitStates().size());
 
+    RTShader::ShaderGenerator::getSingleton().invalidateMaterial(
+        RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME, material, RESOURCEGROUP_NAME);
+
     if (rpass->getTextureUnitStates().size() <= texUnit)
     {
-        rpass->createTextureUnitState(value);
-        return;
+        return rpass->createTextureUnitState();
     }
 
-    rpass->getTextureUnitStates()[texUnit]->setTextureName(value);
+    return rpass->getTextureUnitStates()[texUnit];
+}
+
+void setMaterialProperty(const String& name, int prop, const String& value)
+{
+    auto tu = _getTextureUnitForUpdate(name, prop);
+    tu->setTextureName(value);
+}
+
+void setMaterialProperty(const String& name, int prop, InputArray value)
+{
+    auto tu = _getTextureUnitForUpdate(name, prop);
+
+    auto texName = tu->getTextureName();
+    if(texName.empty()) texName = name;
+
+    _createTexture(texName, value.getMat());
+    tu->setTextureName(texName);
 }
 
 static bool setShaderProperty(const GpuProgramParametersSharedPtr& params, const String& prop,

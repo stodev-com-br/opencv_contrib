@@ -42,9 +42,11 @@ $ cmake -D OPENCV_EXTRA_MODULES_PATH=<opencv_contrib>/modules -D BUILD_opencv_<r
 
 - **julia**: Julia language wrappers with samples and tests.
 
-- **line_descriptor**: Line Segment Extract and Match -- Methods of extracting, describing and latching line segments using binary descriptors.
+- **line_descriptor**: Line Segment Extract and Match -- Methods of extracting, describing and matching line segments using binary descriptors.
 
 - **matlab**: Matlab Interface -- OpenCV Matlab Mex wrapper code generator for certain opencv core modules.
+
+- **mcc**: Macbeth Color Chart detector -- Find and return color patch location in MacBeth color calibration charts.
 
 - **optflow**: Optical Flow -- Algorithms for running and evaluating deepflow, simpleflow, sparsetodenseflow and motion templates (silhouette flow).
 
