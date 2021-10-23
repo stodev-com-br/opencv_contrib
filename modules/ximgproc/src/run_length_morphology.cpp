@@ -120,7 +120,7 @@ static void _threshold(cv::Mat& img, rlVec& res, double threshold, int type)
       _thresholdLine<double>((double*) img.ptr(i), img.cols, i, threshold, type, res);
     break;
   default:
-    CV_Error( CV_StsUnsupportedFormat, "unsupported image type" );
+    CV_Error( Error::StsUnsupportedFormat, "unsupported image type" );
   }
 }
 
@@ -207,7 +207,7 @@ void paint_impl(cv::Mat& img, rlType* pRuns, int nSize, T value)
         paint_impl<double>(_image, pRuns, N - 1, dValue);
         break;
     default:
-        CV_Error(CV_StsUnsupportedFormat, "unsupported image type");
+        CV_Error(Error::StsUnsupportedFormat, "unsupported image type");
         break;
     }
   }
@@ -700,13 +700,13 @@ CV_EXPORTS bool isRLMorphologyPossible(InputArray rlStructuringElement)
   return true;
 }
 
-CV_EXPORTS void createRLEImage(std::vector<cv::Point3i>& runs, OutputArray res, Size size)
+CV_EXPORTS void createRLEImage(const std::vector<cv::Point3i>& runs, OutputArray res, Size size)
 {
     size_t nRuns = runs.size();
     rlVec runsConverted(nRuns);
     for (size_t i = 0u; i < nRuns; ++i)
     {
-        Point3i &curIn = runs[i];
+        const Point3i &curIn = runs[i];
         runsConverted[i] = rlType(curIn.x, curIn.y, curIn.z);
     }
     sortChords(runsConverted);
@@ -801,7 +801,7 @@ CV_EXPORTS void morphologyEx(InputArray rlSrc, OutputArray rlDest, int op, Input
         break;
         default:
         case MORPH_HITMISS:
-            CV_Error(CV_StsBadArg, "unknown or unsupported morphological operation");
+            CV_Error(Error::StsBadArg, "unknown or unsupported morphological operation");
         }
         convertToOutputArray(runsDestination, sizeSource, rlDest);
     }

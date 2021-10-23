@@ -5,9 +5,9 @@
 
 namespace opencv_test { namespace {
 
-const Size img_size(640, 480);
+const Size img_size(320, 240);
 const int FLD_TEST_SEED = 0x134679;
-const int EPOCHS = 20;
+const int EPOCHS = 10;
 
 class FLDBase : public testing::Test
 {
@@ -34,6 +34,18 @@ class ximgproc_FLD: public FLDBase
     public:
         ximgproc_FLD() { }
     protected:
+
+};
+
+class ximgproc_ED: public FLDBase
+{
+    public:
+        ximgproc_ED()
+        {
+            detector = createEdgeDrawing();
+        }
+    protected:
+        Ptr<EdgeDrawing> detector;
 
 };
 
@@ -199,5 +211,89 @@ TEST_F(ximgproc_FLD, rotatedRect)
     ASSERT_EQ(EPOCHS, passedtests);
 }
 
+//************** EDGE DRAWING *******************
 
+TEST_F(ximgproc_ED, whiteNoise)
+{
+    for (int i = 0; i < EPOCHS; ++i)
+    {
+        GenerateWhiteNoise(test_image);
+        detector->detectEdges(test_image);
+        detector->detectLines(lines);
+        if(2u >= lines.size()) ++passedtests;
+    }
+    ASSERT_EQ(EPOCHS, passedtests);
+}
+
+TEST_F(ximgproc_ED, constColor)
+{
+    for (int i = 0; i < EPOCHS; ++i)
+    {
+        GenerateConstColor(test_image);
+        detector->detectEdges(test_image);
+        if(0u == detector->getSegments().size()) ++passedtests;
+    }
+    ASSERT_EQ(EPOCHS, passedtests);
+}
+
+TEST_F(ximgproc_ED, lines)
+{
+    for (int i = 0; i < EPOCHS; ++i)
+    {
+        const unsigned int numOfLines = 1;
+        GenerateLines(test_image, numOfLines);
+        detector->detectEdges(test_image);
+        detector->detectLines(lines);
+        if(numOfLines * 2 == lines.size()) ++passedtests;  // * 2 because of Gibbs effect
+    }
+    ASSERT_EQ(EPOCHS, passedtests);
+}
+
+TEST_F(ximgproc_ED, mergeLines)
+{
+    for (int i = 0; i < EPOCHS; ++i)
+    {
+        const unsigned int numOfLines = 1;
+        GenerateBrokenLines(test_image, numOfLines);
+        detector->detectEdges(test_image);
+        detector->detectLines(lines);
+        if(numOfLines * 2 == lines.size()) ++passedtests;  // * 2 because of Gibbs effect
+    }
+    ASSERT_EQ(EPOCHS, passedtests);
+}
+
+TEST_F(ximgproc_ED, rotatedRect)
+{
+    for (int i = 0; i < EPOCHS; ++i)
+    {
+        GenerateRotatedRect(test_image);
+        detector->detectEdges(test_image);
+        detector->detectLines(lines);
+
+        if(6u <= lines.size())  ++passedtests;
+    }
+    ASSERT_EQ(EPOCHS, passedtests);
+}
+
+TEST_F(ximgproc_ED, ManySmallCircles)
+{
+    string picture_name = "cv/imgproc/beads.jpg";
+
+    string filename = cvtest::TS::ptr()->get_data_path() + picture_name;
+    test_image = imread(filename, IMREAD_GRAYSCALE);
+    EXPECT_FALSE(test_image.empty()) << "Invalid test image: " << filename;
+
+    vector<Vec6d> ellipses;
+    detector->detectEdges(test_image);
+    detector->detectLines(lines);
+    detector->detectEllipses(ellipses);
+
+    size_t segments_size = 6458;
+    size_t lines_size = 6264;
+    size_t ellipses_size = 2449;
+    EXPECT_EQ(detector->getSegments().size(), segments_size);
+    EXPECT_GE(lines.size(), lines_size);
+    EXPECT_LE(lines.size(), lines_size + 2);
+    EXPECT_EQ(ellipses.size(), ellipses_size);
+}
 }} // namespace

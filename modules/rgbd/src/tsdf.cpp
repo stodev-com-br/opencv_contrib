@@ -259,13 +259,13 @@ inline v_float32x4 TSDFVolumeCPU::getNormalVoxel(const v_float32x4& p) const
         const int dim = volDims[c];
         float& nv     = an[c];
 
-        TsdfType vx[8];
+        float vx[8];
         for(int i = 0; i < 8; i++)
-            vx[i] = volData[neighbourCoords[i] + coordBase + 1*dim].tsdf -
-                    volData[neighbourCoords[i] + coordBase - 1*dim].tsdf;
+            vx[i] = tsdfToFloat(volData[neighbourCoords[i] + coordBase + 1*dim].tsdf) -
+                    tsdfToFloat(volData[neighbourCoords[i] + coordBase - 1*dim].tsdf);
 
-        v_float32x4 v0246 = tsdfToFloat_INTR(v_int32x4(vx[0], vx[2], vx[4], vx[6]));
-        v_float32x4 v1357 = tsdfToFloat_INTR(v_int32x4(vx[1], vx[3], vx[5], vx[7]));
+        v_float32x4 v0246 (vx[0], vx[2], vx[4], vx[6]);
+        v_float32x4 v1357 (vx[1], vx[3], vx[5], vx[7]);
         v_float32x4 vxx = v0246 + v_setall_f32(tz)*(v1357 - v0246);
 
         v_float32x4 v00_10 = vxx;
@@ -312,9 +312,9 @@ inline Point3f TSDFVolumeCPU::getNormalVoxel(const Point3f& p) const
         float& nv = an[c];
 
         float vx[8];
-        for(int i = 0; i < 8; i++)
-            vx[i] = tsdfToFloat(volData[neighbourCoords[i] + coordBase + 1*dim].tsdf -
-                                volData[neighbourCoords[i] + coordBase - 1*dim].tsdf);
+        for (int i = 0; i < 8; i++)
+            vx[i] = tsdfToFloat(volData[neighbourCoords[i] + coordBase + 1 * dim].tsdf) -
+                    tsdfToFloat(volData[neighbourCoords[i] + coordBase - 1 * dim].tsdf);
 
         float v00 = vx[0] + tz*(vx[1] - vx[0]);
         float v01 = vx[2] + tz*(vx[3] - vx[2]);
@@ -687,7 +687,6 @@ struct FetchPointsNormalsInvoker : ParallelLoopBody
                                                    (y+shift.y)*vol.volDims[1] +
                                                    (z+shift.z)*vol.volDims[2]];
             float vd = tsdfToFloat(voxeld.tsdf);
-
             if(voxeld.weight != 0 && vd != 1.f)
             {
                 if((v0 > 0 && vd < 0) || (v0 < 0 && vd > 0))
@@ -761,6 +760,7 @@ void TSDFVolumeCPU::fetchPointsNormals(OutputArray _points, OutputArray _normals
         Range range(0, volResolution.x);
         const int nstripes = -1;
         parallel_for_(range, fi, nstripes);
+
         std::vector<ptype> points, normals;
         for(size_t i = 0; i < pVecs.size(); i++)
         {
