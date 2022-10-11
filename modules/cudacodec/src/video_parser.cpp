@@ -45,9 +45,10 @@
 
 #ifdef HAVE_NVCUVID
 
-cv::cudacodec::detail::VideoParser::VideoParser(VideoDecoder* videoDecoder, FrameQueue* frameQueue) :
-    videoDecoder_(videoDecoder), frameQueue_(frameQueue), unparsedPackets_(0), hasError_(false)
+cv::cudacodec::detail::VideoParser::VideoParser(VideoDecoder* videoDecoder, FrameQueue* frameQueue, const bool allowFrameDrop, const bool udpSource) :
+    videoDecoder_(videoDecoder), frameQueue_(frameQueue), allowFrameDrop_(allowFrameDrop)
 {
+    if (udpSource) maxUnparsedPackets_ = 0;
     CUVIDPARSERPARAMS params;
     std::memset(&params, 0, sizeof(CUVIDPARSERPARAMS));
 
@@ -78,16 +79,17 @@ bool cv::cudacodec::detail::VideoParser::parseVideoData(const unsigned char* dat
 
     if (cuvidParseVideoData(parser_, &packet) != CUDA_SUCCESS)
     {
+        CV_LOG_ERROR(NULL, "Call to cuvidParseVideoData failed!");
         hasError_ = true;
         frameQueue_->endDecode();
         return false;
     }
 
-    constexpr int maxUnparsedPackets = 20;
-
     ++unparsedPackets_;
-    if (unparsedPackets_ > maxUnparsedPackets)
+    if (maxUnparsedPackets_ && unparsedPackets_ > maxUnparsedPackets_)
     {
+        CV_LOG_ERROR(NULL, "Maxium number of packets (" << maxUnparsedPackets_ << ") parsed without decoding a frame or reconfiguring the decoder, if reading from \
+            a live source consider initializing with VideoReaderInitParams::udpSource == true.");
         hasError_ = true;
         frameQueue_->endDecode();
         return false;
@@ -118,11 +120,21 @@ int CUDAAPI cv::cudacodec::detail::VideoParser::HandleVideoSequence(void* userDa
         newFormat.nBitDepthMinus8 = format->bit_depth_luma_minus8;
         newFormat.ulWidth = format->coded_width;
         newFormat.ulHeight = format->coded_height;
-        newFormat.width = format->coded_width;
-        newFormat.height = format->coded_height;
-        newFormat.displayArea = Rect(Point(format->display_area.left, format->display_area.top), Point(format->display_area.right, format->display_area.bottom));
         newFormat.fps = format->frame_rate.numerator / static_cast<float>(format->frame_rate.denominator);
-        newFormat.ulNumDecodeSurfaces = max(thiz->videoDecoder_->nDecodeSurfaces(), static_cast<int>(format->min_num_decode_surfaces));
+        newFormat.targetSz = thiz->videoDecoder_->getTargetSz();
+        newFormat.width = newFormat.targetSz.width ? newFormat.targetSz.width : format->coded_width;
+        newFormat.height = newFormat.targetSz.height ? newFormat.targetSz.height : format->coded_height;
+        newFormat.srcRoi = thiz->videoDecoder_->getSrcRoi();
+        if (newFormat.srcRoi.empty()) {
+            format->display_area.right = format->coded_width;
+            format->display_area.bottom = format->coded_height;
+            newFormat.displayArea = Rect(Point(format->display_area.left, format->display_area.top), Point(format->display_area.right, format->display_area.bottom));
+        }
+        else
+            newFormat.displayArea = newFormat.srcRoi;
+        newFormat.targetRoi = thiz->videoDecoder_->getTargetRoi();
+        newFormat.ulNumDecodeSurfaces = min(!thiz->allowFrameDrop_ ? max(thiz->videoDecoder_->nDecodeSurfaces(), static_cast<int>(format->min_num_decode_surfaces)) :
+            format->min_num_decode_surfaces * 2, 32);
         if (format->progressive_sequence)
             newFormat.deinterlaceMode = Weave;
         else
@@ -149,6 +161,7 @@ int CUDAAPI cv::cudacodec::detail::VideoParser::HandleVideoSequence(void* userDa
         }
         catch (const cv::Exception&)
         {
+            CV_LOG_ERROR(NULL, "Attempt to reconfigure Nvidia decoder failed!");
             thiz->hasError_ = true;
             return false;
         }
@@ -163,13 +176,13 @@ int CUDAAPI cv::cudacodec::detail::VideoParser::HandlePictureDecode(void* userDa
 
     thiz->unparsedPackets_ = 0;
 
-    bool isFrameAvailable = thiz->frameQueue_->waitUntilFrameAvailable(picParams->CurrPicIdx);
-
+    bool isFrameAvailable = thiz->frameQueue_->waitUntilFrameAvailable(picParams->CurrPicIdx, thiz->allowFrameDrop_);
     if (!isFrameAvailable)
         return false;
 
     if (!thiz->videoDecoder_->decodePicture(picParams))
     {
+        CV_LOG_ERROR(NULL, "Decoding failed!");
         thiz->hasError_ = true;
         return false;
     }
