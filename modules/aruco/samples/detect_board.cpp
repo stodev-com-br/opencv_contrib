@@ -150,8 +150,7 @@ int main(int argc, char *argv[]) {
                                markerSeparation);
 
     // create board object
-    Ptr<aruco::GridBoard> gridboard =
-        aruco::GridBoard::create(markersX, markersY, markerLength, markerSeparation, dictionary);
+    Ptr<aruco::GridBoard> gridboard = new aruco::GridBoard(Size(markersX, markersY), markerLength, markerSeparation, dictionary);
     Ptr<aruco::Board> board = gridboard.staticCast<aruco::Board>();
 
     double totalTime = 0;
@@ -172,13 +171,21 @@ int main(int argc, char *argv[]) {
 
         // refind strategy to detect more markers
         if(refindStrategy)
-            detector.refineDetectedMarkers(image, board, corners, ids, rejected, camMatrix,
+            detector.refineDetectedMarkers(image, *board, corners, ids, rejected, camMatrix,
                                            distCoeffs);
 
         // estimate board pose
         int markersOfBoardDetected = 0;
-        if(ids.size() > 0)
-            markersOfBoardDetected = estimatePoseBoard(corners, ids, board, camMatrix, distCoeffs, rvec, tvec);
+        if(!ids.empty()) {
+            // Get object and image points for the solvePnP function
+            cv::Mat objPoints, imgPoints;
+            board->matchImagePoints(corners, ids, objPoints, imgPoints);
+
+            // Find pose
+            cv::solvePnP(objPoints, imgPoints, camMatrix, distCoeffs, rvec, tvec);
+
+            markersOfBoardDetected = (int)objPoints.total() / 4;
+        }
 
         double currentTime = ((double)getTickCount() - tick) / getTickFrequency();
         totalTime += currentTime;
@@ -190,11 +197,11 @@ int main(int argc, char *argv[]) {
 
         // draw results
         image.copyTo(imageCopy);
-        if(ids.size() > 0) {
+        if(!ids.empty()) {
             aruco::drawDetectedMarkers(imageCopy, corners, ids);
         }
 
-        if(showRejected && rejected.size() > 0)
+        if(showRejected && !rejected.empty())
             aruco::drawDetectedMarkers(imageCopy, rejected, noArray(), Scalar(100, 0, 255));
 
         if(markersOfBoardDetected > 0)
